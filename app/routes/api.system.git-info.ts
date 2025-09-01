@@ -119,6 +119,7 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
         const response = await fetch('https://api.github.com/user', {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token}`,
           },
         });
@@ -145,6 +146,7 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
         const reposResponse = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated', {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token}`,
           },
         });
@@ -160,6 +162,7 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
         const gistsResponse = await fetch('https://api.github.com/gists', {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token}`,
           },
         });
@@ -228,6 +231,7 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
         const response = await fetch('https://api.github.com/user/orgs', {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token}`,
           },
         });
@@ -274,6 +278,7 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
         const response = await fetch(`https://api.github.com/users/${username}/events?per_page=30`, {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token}`,
           },
         });

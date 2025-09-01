@@ -28,6 +28,7 @@ import type { ElementInfo } from '~/components/workbench/Inspector';
 import type { TextUIPart, FileUIPart, Attachment } from '@ai-sdk/ui-utils';
 import { useMCPStore } from '~/lib/stores/mcp';
 import type { LlmErrorAlertType } from '~/types/actions';
+import { clearSemanticContext, semanticSearchContext } from '~/lib/stores/semantic-search';
 
 const toastAnimation = cssTransition({
   enter: 'animated fadeInRight',
@@ -149,6 +150,7 @@ export const ChatImpl = memo(
     const [chatMode, setChatMode] = useState<'discuss' | 'build'>('build');
     const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
     const mcpSettings = useMCPStore((state) => state.settings);
+    const selectedSemanticContext = useStore(semanticSearchContext);
 
     const {
       messages,
@@ -440,6 +442,16 @@ export const ChatImpl = memo(
         finalMessageContent = messageContent + elementInfo;
       }
 
+      // --- START: Semantic Context Injection ---
+      if (selectedSemanticContext.length > 0) {
+        const contextHeader = '--- Code Context Retrieved from Semantic Search ---\n';
+        const contextString = selectedSemanticContext.join('\n---\n');
+        const fullContext = `${contextHeader}${contextString}\n--- End of Context ---\n\n`;
+        finalMessageContent = `${fullContext}${finalMessageContent}`;
+      }
+
+      // --- END: Semantic Context Injection ---
+
       runAnimation();
 
       if (!chatStarted) {
@@ -500,6 +512,7 @@ export const ChatImpl = memo(
               setImageDataList([]);
 
               resetEnhancer();
+              clearSemanticContext(); // Clear context after use
 
               textareaRef.current?.blur();
               setFakeLoading(false);
@@ -531,6 +544,7 @@ export const ChatImpl = memo(
         setImageDataList([]);
 
         resetEnhancer();
+        clearSemanticContext(); // Clear context after use
 
         textareaRef.current?.blur();
 
@@ -585,6 +599,7 @@ export const ChatImpl = memo(
       setImageDataList([]);
 
       resetEnhancer();
+      clearSemanticContext(); // Clear context after use
 
       textareaRef.current?.blur();
     };

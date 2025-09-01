@@ -441,6 +441,7 @@ export default function GitHubConnection() {
       const response = await fetch('https://api.github.com/rate_limit', {
         headers: {
           Authorization: `Bearer ${token}`,
+          'User-Agent': 'bolt.diy-app',
           Accept: 'application/vnd.github.v3+json',
         },
       });

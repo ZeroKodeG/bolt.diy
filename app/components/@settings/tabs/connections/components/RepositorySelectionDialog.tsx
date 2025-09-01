@@ -75,6 +75,7 @@ export function RepositorySelectionDialog({ isOpen, onClose, onSelect }: Reposit
       fetch('https://api.github.com/user', {
         headers: {
           Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'bolt.diy-app',
           Authorization: `Bearer ${token}`,
         },
       })
@@ -139,6 +140,7 @@ export function RepositorySelectionDialog({ isOpen, onClose, onSelect }: Reposit
       const response = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100&type=all', {
         headers: {
           Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'bolt.diy-app',
           Authorization: `Bearer ${connection.token}`,
         },
       });
@@ -190,6 +192,7 @@ export function RepositorySelectionDialog({ isOpen, onClose, onSelect }: Reposit
         {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
           },
         },
       );
@@ -222,6 +225,7 @@ export function RepositorySelectionDialog({ isOpen, onClose, onSelect }: Reposit
       const headers: HeadersInit = connection?.token
         ? {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${connection.token}`,
           }
         : {};
@@ -294,12 +298,14 @@ export function RepositorySelectionDialog({ isOpen, onClose, onSelect }: Reposit
       if (connection?.token) {
         headers = {
           Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'bolt.diy-app',
           Authorization: `Bearer ${connection.token}`,
         };
       } else if (import.meta.env.VITE_GITHUB_ACCESS_TOKEN) {
         // Use token from environment variables
         headers = {
           Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'bolt.diy-app',
           Authorization: `Bearer ${import.meta.env.VITE_GITHUB_ACCESS_TOKEN}`,
         };
       }

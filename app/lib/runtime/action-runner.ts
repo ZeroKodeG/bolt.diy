@@ -6,6 +6,7 @@ import { createScopedLogger } from '~/utils/logger';
 import { unreachable } from '~/utils/unreachable';
 import type { ActionCallbackData } from './message-parser';
 import type { BoltShell } from '~/utils/shell';
+import { chatId } from '~/lib/persistence';
 
 const logger = createScopedLogger('ActionRunner');
 
@@ -317,15 +318,40 @@ export class ActionRunner {
         await webcontainer.fs.mkdir(folder, { recursive: true });
         logger.debug('Created folder', folder);
       } catch (error) {
-        logger.error('Failed to create folder\n\n', error);
+        logger.error('Failed to create folder\\n\\n', error);
       }
     }
 
     try {
       await webcontainer.fs.writeFile(relativePath, action.content);
       logger.debug(`File written ${relativePath}`);
+
+      /*
+       * --- Inicio: Indexación Semántica ---
+       * No esperamos (await) a que termine, es fire-and-forget
+       */
+      const currentChatId = chatId.get();
+
+      if (currentChatId) {
+        fetch('/api/semantic-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'INDEX_VIRTUAL_FILE',
+            payload: {
+              filePath: relativePath,
+              content: action.content,
+              chatId: currentChatId,
+            },
+          }),
+        }).catch((err) => {
+          logger.error('[Semantic Search] Error al intentar indexar archivo:', err);
+        });
+      }
+
+      /* --- Fin: Indexación Semántica --- */
     } catch (error) {
-      logger.error('Failed to write file\n\n', error);
+      logger.error('Failed to write file\\n\\n', error);
     }
   }
 

@@ -114,6 +114,7 @@ export function PushToGitHubDialog({ isOpen, onClose, onPush }: PushToGitHubDial
         const response = await fetch(requestUrl, {
           headers: {
             Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'bolt.diy-app',
             Authorization: `Bearer ${token.trim()}`,
           },
         });

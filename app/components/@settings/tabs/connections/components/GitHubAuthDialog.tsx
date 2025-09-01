@@ -28,6 +28,7 @@ export function GitHubAuthDialog({ isOpen, onClose }: GitHubAuthDialogProps) {
       const response = await fetch('https://api.github.com/user', {
         headers: {
           Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'bolt.diy-app',
           Authorization: `Bearer ${token}`,
         },
       });
