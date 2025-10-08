@@ -3,7 +3,7 @@
  */
 
 import type { Message } from 'ai';
-import type { IChatMetadata } from './types'; // Import IChatMetadata
+import type { IChatMetadata } from './db'; // Import IChatMetadata
 
 export interface ChatMessage {
   id: string;

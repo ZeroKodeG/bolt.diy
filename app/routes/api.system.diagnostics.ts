@@ -71,7 +71,6 @@ export const loader: LoaderFunction = async ({ request, context }: LoaderFunctio
       method: 'GET',
       headers: {
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'bolt.diy-app',
       },
     });
 

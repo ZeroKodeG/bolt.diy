@@ -1,9 +1,9 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { streamText } from '~/lib/.server/llm/stream-text';
-import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
-import type { ProviderInfo } from '~/types/model';
-import { createScopedLogger } from '~/utils/logger';
 import { stripIndents } from '~/utils/stripIndent';
+import type { ProviderInfo } from '~/types/model';
+import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
+import { createScopedLogger } from '~/utils/logger';
 
 export async function action(args: ActionFunctionArgs) {
   return enhancerAction(args);
@@ -51,7 +51,7 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
             You are a professional prompt engineer specializing in crafting precise, effective prompts.
             Your task is to enhance prompts by making them more specific, actionable, and effective.
 
-            I want you to improve the user prompt that is wrapped in <original_prompt> tags.
+            I want you to improve the user prompt that is wrapped in \`<original_prompt>\` tags.
 
             For valid prompts:
             - Make instructions explicit and unambiguous
@@ -110,25 +110,15 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
       }
     })();
 
-    const encoder = new TextEncoder();
-
-    return new Response(
-      result.textStream.pipeThrough(
-        new TransformStream({
-          transform: (chunk, controller) => {
-            controller.enqueue(encoder.encode(chunk));
-          },
-        }),
-      ),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream',
-          Connection: 'keep-alive',
-          'Cache-Control': 'no-cache',
-        },
+    // Return the text stream directly since it's already text data
+    return new Response(result.textStream, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        Connection: 'keep-alive',
+        'Cache-Control': 'no-cache',
       },
-    );
+    });
   } catch (error: unknown) {
     console.log(error);
 

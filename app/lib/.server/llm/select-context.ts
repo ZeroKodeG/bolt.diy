@@ -6,7 +6,6 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROVIDER_LIST } from '~/utils/constant
 import { createFilesContext, extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './utils';
 import { createScopedLogger } from '~/utils/logger';
 import { LLMManager } from '~/lib/modules/llm/manager';
-import { searchIndex } from '~/lib/semantic-search.server';
 
 // Common patterns to ignore, similar to .gitignore
 
@@ -39,7 +38,7 @@ export async function selectContext(props: {
 
       content = simplifyBoltActions(content);
 
-      content = content.replace(/<div class=\"__boltThought__\">.*?<\/div>/s, '');
+      content = content.replace(/<div class=\\"__boltThought__\\">.*?<\/div>/s, '');
       content = content.replace(/<think>.*?<\/think>/s, '');
 
       return { ...message, content };
@@ -186,11 +185,11 @@ export async function selectContext(props: {
 
   const includeFiles =
     updateContextBuffer[1]
-      .match(/<includeFile path=\"(.*?)\"/gm)
+      .match(/<includeFile path="(.*?)"/gm)
       ?.map((x) => x.replace('<includeFile path="', '').replace('"', '')) || [];
   const excludeFiles =
     updateContextBuffer[1]
-      .match(/<excludeFile path=\"(.*?)\"/gm)
+      .match(/<excludeFile path="(.*?)"/gm)
       ?.map((x) => x.replace('<excludeFile path="', '').replace('"', '')) || [];
 
   const filteredFiles: FileMap = {};
@@ -224,54 +223,10 @@ export async function selectContext(props: {
 
   const totalFiles = Object.keys(filteredFiles).length;
   logger.info(`Total files: ${totalFiles}`);
-  logger.info(`files: `, filteredFiles);
 
   if (totalFiles == 0) {
     throw new Error(`Bolt failed to select files`);
   }
-
-  // --- START: Semantic Search Comparison ---
-  try {
-    if (props.promptId) {
-      const semanticSearchResults = await searchIndex(extractTextContent(lastUserMessage), props.promptId);
-      const semanticFiles = [...new Set(semanticSearchResults.map((r) => r.filePath))]; // Get unique file paths
-
-      const filteredSemanticFiles: FileMap = {};
-      semanticFiles.forEach((path) => {
-        let fullPath = path;
-
-        if (!path.startsWith('/home/project/')) {
-          fullPath = `/home/project/${path}`;
-        }
-
-        if (!filePaths.includes(fullPath)) {
-          logger.error(`File ${path} is not in the list of files above.`);
-          return;
-        }
-
-        if (currrentFiles.includes(path)) {
-          return;
-        }
-
-        filteredSemanticFiles[path] = files[fullPath];
-      });
-
-      console.log('--- CONTEXT SELECTION COMPARISON ---');
-      console.log('LLM Selection:', includeFiles);
-      console.log('Semantic Search Selection:', Object.keys(filteredSemanticFiles));
-      console.log('------------------------------------');
-
-      return filteredSemanticFiles;
-    } else {
-      console.log('--- CONTEXT SELECTION COMPARISON ---');
-      console.log('Skipping semantic search comparison: promptId not available.');
-      console.log('------------------------------------');
-    }
-  } catch (e) {
-    console.error('Semantic search comparison failed:', e);
-  }
-
-  // --- END: Semantic Search Comparison ---
 
   return filteredFiles;
 

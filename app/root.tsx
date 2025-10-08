@@ -1,19 +1,17 @@
 import { useStore } from '@nanostores/react';
 import type { LinksFunction } from '@remix-run/cloudflare';
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useNavigate } from '@remix-run/react';
+import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react';
 import tailwindReset from '@unocss/reset/tailwind-compat.css?url';
-import { themeStore } from '~/lib/stores/theme';
-import { stripIndents } from '~/utils/stripIndent';
+import { themeStore } from './lib/stores/theme';
+import { stripIndents } from './utils/stripIndent';
 import { createHead } from 'remix-island';
 import { useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { ClientOnly } from 'remix-utils/client-only';
-import { supabase } from '~/lib/supabase';
-import { setSession } from '~/lib/stores/session';
-import { logStore } from '~/lib/stores/logs';
+
 import reactToastifyStyles from 'react-toastify/dist/ReactToastify.css?url';
-import globalStyles from '~/styles/index.scss?url';
+import globalStyles from './styles/index.scss?url';
 import xtermStyles from '@xterm/xterm/css/xterm.css?url';
 
 import 'virtual:uno.css';
@@ -44,18 +42,18 @@ export const links: LinksFunction = () => [
 ];
 
 const inlineThemeCode = stripIndents`
-   setTutorialKitTheme();
- 
-   function setTutorialKitTheme() {
-     let theme = localStorage.getItem('bolt_theme');
- 
-     if (!theme) {
-       theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-     }
- 
-     document.querySelector('html')?.setAttribute('data-theme', theme);
-   }
- `;
+  setTutorialKitTheme();
+
+  function setTutorialKitTheme() {
+    let theme = localStorage.getItem('bolt_theme');
+
+    if (!theme) {
+      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    document.querySelector('html')?.setAttribute('data-theme', theme);
+  }
+`;
 
 export const Head = createHead(() => (
   <>
@@ -83,13 +81,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+import { logStore } from './lib/stores/logs';
+
 export default function App() {
   const theme = useStore(themeStore);
-  const navigate = useNavigate(); // Añadido
 
   useEffect(() => {
-    console.log('[Root] Componente App montado, configurando oyente de autenticación.');
-
     logStore.logSystem('Application initialized', {
       theme,
       platform: navigator.platform,

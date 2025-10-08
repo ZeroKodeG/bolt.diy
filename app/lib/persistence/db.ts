@@ -1,176 +1,229 @@
 import type { Message } from 'ai';
 import { createScopedLogger } from '~/utils/logger';
-import type { ChatHistoryItem, IChatMetadata } from './types';
-import type { Snapshot } from './types';
-import { supabase } from '~/lib/supabase';
-import { sessionStore } from '~/lib/stores/session';
+import type { ChatHistoryItem } from './useChatHistory';
+import type { Snapshot } from './types'; // Import Snapshot type
 
-const logger = createScopedLogger('SupabaseDB');
+export interface IChatMetadata {
+  gitUrl: string;
+  gitBranch?: string;
+  netlifySiteId?: string;
+}
 
-// No longer need to open a DB, Supabase client is initialized elsewhere.
+const logger = createScopedLogger('ChatHistory');
 
-export async function getAll(): Promise<ChatHistoryItem[]> {
-  const { user } = sessionStore.get();
-
-  if (!user) {
-    return [];
+// this is used at the top level and never rejects
+export async function openDatabase(): Promise<IDBDatabase | undefined> {
+  if (typeof indexedDB === 'undefined') {
+    console.error('indexedDB is not available in this environment.');
+    return undefined;
   }
 
-  const { data, error } = await supabase
-    .from('chats')
-    .select('id, url_id, description, updated_at')
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false });
+  return new Promise((resolve) => {
+    const request = indexedDB.open('boltHistory', 2);
 
-  if (error) {
-    logger.error('Failed to fetch chat list:', error);
-    throw error;
-  }
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      const oldVersion = event.oldVersion;
 
-  // Map the data to the ChatHistoryItem interface
-  return data.map((chat) => ({
-    id: String(chat.id),
-    urlId: chat.url_id || undefined,
-    description: chat.description || undefined,
-    messages: [], // Not fetching full messages for the list view
-    timestamp: chat.updated_at,
-  }));
+      if (oldVersion < 1) {
+        if (!db.objectStoreNames.contains('chats')) {
+          const store = db.createObjectStore('chats', { keyPath: 'id' });
+          store.createIndex('id', 'id', { unique: true });
+          store.createIndex('urlId', 'urlId', { unique: true });
+        }
+      }
+
+      if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains('snapshots')) {
+          db.createObjectStore('snapshots', { keyPath: 'chatId' });
+        }
+      }
+    };
+
+    request.onsuccess = (event: Event) => {
+      resolve((event.target as IDBOpenDBRequest).result);
+    };
+
+    request.onerror = (event: Event) => {
+      resolve(undefined);
+      logger.error((event.target as IDBOpenDBRequest).error);
+    };
+  });
+}
+
+export async function getAll(db: IDBDatabase): Promise<ChatHistoryItem[]> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readonly');
+    const store = transaction.objectStore('chats');
+    const request = store.getAll();
+
+    request.onsuccess = () => resolve(request.result as ChatHistoryItem[]);
+    request.onerror = () => reject(request.error);
+  });
 }
 
 export async function setMessages(
-  id: string, // This is now the Supabase table ID
+  db: IDBDatabase,
+  id: string,
   messages: Message[],
   urlId?: string,
   description?: string,
+  timestamp?: string,
   metadata?: IChatMetadata,
 ): Promise<void> {
-  const { user } = sessionStore.get();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readwrite');
+    const store = transaction.objectStore('chats');
 
-  if (!user) {
-    throw new Error('User not authenticated');
-  }
+    if (timestamp && isNaN(Date.parse(timestamp))) {
+      reject(new Error('Invalid timestamp'));
+      return;
+    }
 
-  const { error } = await supabase.from('chats').upsert({
-    id: parseInt(id, 10),
-    user_id: user.id,
-    messages: messages as any, // Supabase expects jsonb
-    url_id: urlId,
-    description,
-    metadata,
-    updated_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    logger.error('Failed to set messages:', error);
-    throw error;
-  }
-}
-
-export async function getMessages(id: string): Promise<ChatHistoryItem> {
-  const { user } = sessionStore.get();
-
-  if (!user) {
-    throw new Error('User not authenticated');
-  }
-
-  /*
-   * In Supabase, the URL ID or the primary ID can be used to fetch.
-   * We'll assume the ID passed is the primary key for simplicity now.
-   */
-  const { data, error } = await supabase
-    .from('chats')
-    .select('*')
-    .eq('id', parseInt(id, 10))
-    .eq('user_id', user.id)
-    .single();
-
-  if (error) {
-    logger.error(`Failed to get messages for chat ${id}:`, error);
-    throw error;
-  }
-
-  if (!data) {
-    throw new Error(`Chat with id ${id} not found.`);
-  }
-
-  return {
-    id: String(data.id),
-    urlId: data.url_id || undefined,
-    description: data.description || undefined,
-    messages: data.messages as Message[],
-    timestamp: data.updated_at,
-    metadata: data.metadata || undefined,
-  };
-}
-
-export async function deleteById(id: string): Promise<void> {
-  const { user } = sessionStore.get();
-
-  if (!user) {
-    throw new Error('User not authenticated');
-  }
-
-  const { error } = await supabase.from('chats').delete().eq('id', parseInt(id, 10)).eq('user_id', user.id);
-
-  if (error) {
-    logger.error(`Failed to delete chat ${id}:`, error);
-    throw error;
-  }
-}
-
-export async function createChatFromMessages(
-  description: string,
-  messages: Message[],
-  metadata?: IChatMetadata,
-): Promise<string> {
-  // Returns the new chat ID
-  const { user } = sessionStore.get();
-
-  if (!user) {
-    throw new Error('User not authenticated');
-  }
-
-  const { data, error } = await supabase
-    .from('chats')
-    .insert({
-      user_id: user.id,
+    const request = store.put({
+      id,
+      messages,
+      urlId,
       description,
-      messages: messages as any,
+      timestamp: timestamp ?? new Date().toISOString(),
       metadata,
-    })
-    .select()
-    .single();
+    });
 
-  if (error || !data) {
-    logger.error('Failed to create new chat:', error);
-    throw error || new Error('Failed to create new chat');
-  }
-
-  // Update the new chat with a url_id that is the same as its primary key
-  const newId = String(data.id);
-  const { error: updateError } = await supabase.from('chats').update({ url_id: newId }).eq('id', data.id);
-
-  if (updateError) {
-    logger.error('Failed to set url_id for new chat:', updateError);
-
-    // Don't throw, the chat was still created
-  }
-
-  return newId;
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
 }
 
-export async function duplicateChat(id: string): Promise<string> {
-  const chat = await getMessages(id);
-
-  if (!chat) {
-    throw new Error('Chat not found');
-  }
-
-  return createChatFromMessages(`${chat.description || 'Chat'} (copy)`, chat.messages, chat.metadata);
+export async function getMessages(db: IDBDatabase, id: string): Promise<ChatHistoryItem> {
+  return (await getMessagesById(db, id)) || (await getMessagesByUrlId(db, id));
 }
 
-export async function forkChat(chatId: string, messageId: string): Promise<string> {
-  const chat = await getMessages(chatId);
+export async function getMessagesByUrlId(db: IDBDatabase, id: string): Promise<ChatHistoryItem> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readonly');
+    const store = transaction.objectStore('chats');
+    const index = store.index('urlId');
+    const request = index.get(id);
+
+    request.onsuccess = () => resolve(request.result as ChatHistoryItem);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getMessagesById(db: IDBDatabase, id: string): Promise<ChatHistoryItem> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readonly');
+    const store = transaction.objectStore('chats');
+    const request = store.get(id);
+
+    request.onsuccess = () => resolve(request.result as ChatHistoryItem);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteById(db: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['chats', 'snapshots'], 'readwrite'); // Add snapshots store to transaction
+    const chatStore = transaction.objectStore('chats');
+    const snapshotStore = transaction.objectStore('snapshots');
+
+    const deleteChatRequest = chatStore.delete(id);
+    const deleteSnapshotRequest = snapshotStore.delete(id); // Also delete snapshot
+
+    let chatDeleted = false;
+    let snapshotDeleted = false;
+
+    const checkCompletion = () => {
+      if (chatDeleted && snapshotDeleted) {
+        resolve(undefined);
+      }
+    };
+
+    deleteChatRequest.onsuccess = () => {
+      chatDeleted = true;
+      checkCompletion();
+    };
+    deleteChatRequest.onerror = () => reject(deleteChatRequest.error);
+
+    deleteSnapshotRequest.onsuccess = () => {
+      snapshotDeleted = true;
+      checkCompletion();
+    };
+
+    deleteSnapshotRequest.onerror = (event) => {
+      if ((event.target as IDBRequest).error?.name === 'NotFoundError') {
+        snapshotDeleted = true;
+        checkCompletion();
+      } else {
+        reject(deleteSnapshotRequest.error);
+      }
+    };
+
+    transaction.oncomplete = () => {
+      // This might resolve before checkCompletion if one operation finishes much faster
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function getNextId(db: IDBDatabase): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readonly');
+    const store = transaction.objectStore('chats');
+    const request = store.getAllKeys();
+
+    request.onsuccess = () => {
+      const highestId = request.result.reduce((cur, acc) => Math.max(+cur, +acc), 0);
+      resolve(String(+highestId + 1));
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getUrlId(db: IDBDatabase, id: string): Promise<string> {
+  const idList = await getUrlIds(db);
+
+  if (!idList.includes(id)) {
+    return id;
+  } else {
+    let i = 2;
+
+    while (idList.includes(`${id}-${i}`)) {
+      i++;
+    }
+
+    return `${id}-${i}`;
+  }
+}
+
+async function getUrlIds(db: IDBDatabase): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chats', 'readonly');
+    const store = transaction.objectStore('chats');
+    const idList: string[] = [];
+
+    const request = store.openCursor();
+
+    request.onsuccess = (event: Event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+
+      if (cursor) {
+        idList.push(cursor.value.urlId);
+        cursor.continue();
+      } else {
+        resolve(idList);
+      }
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
+export async function forkChat(db: IDBDatabase, chatId: string, messageId: string): Promise<string> {
+  const chat = await getMessages(db, chatId);
 
   if (!chat) {
     throw new Error('Chat not found');
@@ -186,65 +239,105 @@ export async function forkChat(chatId: string, messageId: string): Promise<strin
   // Get messages up to and including the selected message
   const messages = chat.messages.slice(0, messageIndex + 1);
 
-  return createChatFromMessages(`${chat.description || 'Chat'} (fork)`, messages, chat.metadata);
+  return createChatFromMessages(db, chat.description ? `${chat.description} (fork)` : 'Forked chat', messages);
 }
 
-export async function updateChatDescription(id: string, description: string): Promise<void> {
-  const { user } = sessionStore.get();
+export async function duplicateChat(db: IDBDatabase, id: string): Promise<string> {
+  const chat = await getMessages(db, id);
 
-  if (!user) {
-    throw new Error('User not authenticated');
+  if (!chat) {
+    throw new Error('Chat not found');
   }
 
-  const { error } = await supabase
-    .from('chats')
-    .update({ description, updated_at: new Date().toISOString() })
-    .eq('id', parseInt(id, 10))
-    .eq('user_id', user.id);
-
-  if (error) {
-    logger.error(`Failed to update chat description for ${id}:`, error);
-    throw error;
-  }
+  return createChatFromMessages(db, `${chat.description || 'Chat'} (copy)`, chat.messages);
 }
 
-export async function getSnapshot(chatId: string): Promise<Snapshot | undefined> {
-  const { user } = sessionStore.get();
+export async function createChatFromMessages(
+  db: IDBDatabase,
+  description: string,
+  messages: Message[],
+  metadata?: IChatMetadata,
+): Promise<string> {
+  const newId = await getNextId(db);
+  const newUrlId = await getUrlId(db, newId); // Get a new urlId for the duplicated chat
 
-  if (!user) {
-    return undefined;
-  }
+  await setMessages(
+    db,
+    newId,
+    messages,
+    newUrlId, // Use the new urlId
+    description,
+    undefined, // Use the current timestamp
+    metadata,
+  );
 
-  const { data, error } = await supabase
-    .from('chats')
-    .select('snapshot')
-    .eq('id', parseInt(chatId, 10))
-    .eq('user_id', user.id)
-    .single();
-
-  if (error) {
-    logger.error(`Failed to get snapshot for chat ${chatId}:`, error);
-    return undefined;
-  }
-
-  return data?.snapshot as Snapshot | undefined;
+  return newUrlId; // Return the urlId instead of id for navigation
 }
 
-export async function setSnapshot(chatId: string, snapshot: Snapshot): Promise<void> {
-  const { user } = sessionStore.get();
+export async function updateChatDescription(db: IDBDatabase, id: string, description: string): Promise<void> {
+  const chat = await getMessages(db, id);
 
-  if (!user) {
-    throw new Error('User not authenticated');
+  if (!chat) {
+    throw new Error('Chat not found');
   }
 
-  const { error } = await supabase
-    .from('chats')
-    .update({ snapshot: snapshot as any })
-    .eq('id', parseInt(chatId, 10))
-    .eq('user_id', user.id);
-
-  if (error) {
-    logger.error(`Failed to set snapshot for chat ${chatId}:`, error);
-    throw error;
+  if (!description.trim()) {
+    throw new Error('Description cannot be empty');
   }
+
+  await setMessages(db, id, chat.messages, chat.urlId, description, chat.timestamp, chat.metadata);
+}
+
+export async function updateChatMetadata(
+  db: IDBDatabase,
+  id: string,
+  metadata: IChatMetadata | undefined,
+): Promise<void> {
+  const chat = await getMessages(db, id);
+
+  if (!chat) {
+    throw new Error('Chat not found');
+  }
+
+  await setMessages(db, id, chat.messages, chat.urlId, chat.description, chat.timestamp, metadata);
+}
+
+export async function getSnapshot(db: IDBDatabase, chatId: string): Promise<Snapshot | undefined> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('snapshots', 'readonly');
+    const store = transaction.objectStore('snapshots');
+    const request = store.get(chatId);
+
+    request.onsuccess = () => resolve(request.result?.snapshot as Snapshot | undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function setSnapshot(db: IDBDatabase, chatId: string, snapshot: Snapshot): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('snapshots', 'readwrite');
+    const store = transaction.objectStore('snapshots');
+    const request = store.put({ chatId, snapshot });
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteSnapshot(db: IDBDatabase, chatId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('snapshots', 'readwrite');
+    const store = transaction.objectStore('snapshots');
+    const request = store.delete(chatId);
+
+    request.onsuccess = () => resolve();
+
+    request.onerror = (event) => {
+      if ((event.target as IDBRequest).error?.name === 'NotFoundError') {
+        resolve();
+      } else {
+        reject(request.error);
+      }
+    };
+  });
 }
