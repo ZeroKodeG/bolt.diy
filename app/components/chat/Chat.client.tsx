@@ -5,7 +5,8 @@ import { useAnimate } from 'framer-motion';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { cssTransition, toast, ToastContainer } from 'react-toastify';
 import { useMessageParser, usePromptEnhancer, useShortcuts } from '~/lib/hooks';
-import { description, useChatHistory } from '~/lib/persistence';
+import { description as descriptionStore, useChatHistory, chatId } from '~/lib/persistence';
+import { createChatFromMessages } from '~/lib/persistence/db';
 import { chatStore } from '~/lib/stores/chat';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROMPT_COOKIE_KEY, PROVIDER_LIST } from '~/utils/constants';
@@ -16,12 +17,11 @@ import Cookies from 'js-cookie';
 import { debounce } from '~/utils/debounce';
 import { useSettings } from '~/lib/hooks/useSettings';
 import type { ProviderInfo } from '~/types/model';
-import { useSearchParams } from '@remix-run/react';
+import { useNavigate, useSearchParams } from '@remix-run/react';
 import { createSampler } from '~/utils/sampler';
 import { getTemplates, selectStarterTemplate } from '~/utils/selectStarterTemplate';
 import { logStore } from '~/lib/stores/logs';
 import { streamingState } from '~/lib/stores/streaming';
-import { filesToArtifacts } from '~/utils/fileUtils';
 import { supabaseConnection } from '~/lib/stores/supabase';
 import { defaultDesignScheme, type DesignScheme } from '~/types/design-scheme';
 import type { ElementInfo } from '~/components/workbench/Inspector';
@@ -41,7 +41,7 @@ export function Chat() {
   renderLogger.trace('Chat');
 
   const { ready, initialMessages, storeMessageHistory, importChat, exportChat } = useChatHistory();
-  const title = useStore(description);
+  const title = useStore(descriptionStore);
   useEffect(() => {
     workbenchStore.setReloadedMessages(initialMessages.map((m) => m.id));
   }, [initialMessages]);
@@ -118,6 +118,8 @@ interface ChatProps {
 export const ChatImpl = memo(
   ({ description, initialMessages, storeMessageHistory, importChat, exportChat }: ChatProps) => {
     useShortcuts();
+
+    const navigate = useNavigate();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
@@ -211,6 +213,9 @@ export const ChatImpl = memo(
       initialMessages,
       initialInput: Cookies.get(PROMPT_COOKIE_KEY) || '',
     });
+
+    console.error(error);
+
     useEffect(() => {
       const prompt = searchParams.get('prompt');
 
@@ -436,13 +441,12 @@ export const ChatImpl = memo(
       let finalMessageContent = messageContent;
 
       if (selectedElement) {
-        console.log('Selected Element:', selectedElement);
-
-        const elementInfo = `<div class=\"__boltSelectedElement__\" data-element='${JSON.stringify(selectedElement)}'>${JSON.stringify(`${selectedElement.displayText}`)}</div>`;
-        finalMessageContent = messageContent + elementInfo;
+        const elementInfo = `<div class="__boltSelectedElement__" data-element='${JSON.stringify(
+          selectedElement,
+        )}'>${JSON.stringify(`${selectedElement.displayText}`)}</div>`;
+        finalMessageContent += elementInfo;
       }
 
-      // --- START: Semantic Context Injection ---
       if (selectedSemanticContext.length > 0) {
         const contextHeader = '--- Code Context Retrieved from Semantic Search ---\n';
         const contextString = selectedSemanticContext.join('\n---\n');
@@ -450,135 +454,97 @@ export const ChatImpl = memo(
         finalMessageContent = `${fullContext}${finalMessageContent}`;
       }
 
-      // --- END: Semantic Context Injection ---
-
       runAnimation();
 
-      if (!chatStarted) {
+      const currentChatId = chatId.get();
+
+      if (!currentChatId) {
+        // This is a NEW chat.
         setFakeLoading(true);
 
-        if (autoSelectTemplate) {
+        try {
           const { template, title } = await selectStarterTemplate({
             message: finalMessageContent,
             model,
             provider,
           });
 
-          if (template !== 'blank') {
-            const temResp = await getTemplates(template, title).catch((e) => {
-              if (e.message.includes('rate limit')) {
-                toast.warning('Rate limit exceeded. Skipping starter template\n Continuing with blank template');
-              } else {
-                toast.warning('Failed to import starter template\n Continuing with blank template');
-              }
+          const newChatDescription = title || 'New Chat';
+          descriptionStore.set(newChatDescription);
 
+          // Handle template-based chat creation
+          if (template !== 'blank' && autoSelectTemplate) {
+            const temResp = await getTemplates(template, title).catch((e) => {
+              toast.warning(
+                e.message.includes('rate limit')
+                  ? 'Rate limit exceeded. Skipping starter template.'
+                  : 'Failed to import starter template.',
+              );
               return null;
             });
 
             if (temResp) {
               const { assistantMessage, userMessage } = temResp;
-              const userMessageText = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`;
-
-              setMessages([
+              const initialUserMessage: Message = {
+                id: `1-${Date.now()}`,
+                role: 'user',
+                content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`,
+                parts: createMessageParts(finalMessageContent, imageDataList),
+                experimental_attachments: await filesToAttachments(uploadedFiles),
+              };
+              const fullInitialMessages: Message[] = [
+                initialUserMessage,
+                { id: `2-${Date.now()}`, role: 'assistant', content: assistantMessage },
                 {
-                  id: `1-${new Date().getTime()}`,
-                  role: 'user',
-                  content: userMessageText,
-                  parts: createMessageParts(userMessageText, imageDataList),
-                },
-                {
-                  id: `2-${new Date().getTime()}`,
-                  role: 'assistant',
-                  content: assistantMessage,
-                },
-                {
-                  id: `3-${new Date().getTime()}`,
+                  id: `3-${Date.now()}`,
                   role: 'user',
                   content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${userMessage}`,
                   annotations: ['hidden'],
                 },
-              ]);
+              ];
 
-              const reloadOptions =
-                uploadedFiles.length > 0
-                  ? { experimental_attachments: await filesToAttachments(uploadedFiles) }
-                  : undefined;
+              const newId = await createChatFromMessages(newChatDescription, fullInitialMessages);
+              chatId.set(newId);
+              navigate(`/chat/${newId}`, { replace: true });
+              setMessages(fullInitialMessages);
+              reload();
 
-              reload(reloadOptions);
+              // Cleanup and exit
               setInput('');
               Cookies.remove(PROMPT_COOKIE_KEY);
-
               setUploadedFiles([]);
               setImageDataList([]);
-
               resetEnhancer();
-              clearSemanticContext(); // Clear context after use
-
+              clearSemanticContext();
               textareaRef.current?.blur();
               setFakeLoading(false);
 
               return;
             }
           }
+
+          // Fallback to normal new chat creation if no template or template fails
+          const userMessage: Message = {
+            id: `${Date.now()}`,
+            role: 'user',
+            content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`,
+            parts: createMessageParts(finalMessageContent, imageDataList),
+            experimental_attachments: await filesToAttachments(uploadedFiles),
+          };
+
+          const newId = await createChatFromMessages(newChatDescription, [userMessage]);
+          chatId.set(newId);
+          navigate(`/chat/${newId}`, { replace: true });
+          setMessages([userMessage]);
+          reload();
+        } catch (error) {
+          handleError(error, 'template');
+        } finally {
+          setFakeLoading(false);
         }
-
-        // If autoSelectTemplate is disabled or template selection failed, proceed with normal message
-        const userMessageText = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`;
-        const attachments = uploadedFiles.length > 0 ? await filesToAttachments(uploadedFiles) : undefined;
-
-        setMessages([
-          {
-            id: `${new Date().getTime()}`,
-            role: 'user',
-            content: userMessageText,
-            parts: createMessageParts(userMessageText, imageDataList),
-            experimental_attachments: attachments,
-          },
-        ]);
-        reload(attachments ? { experimental_attachments: attachments } : undefined);
-        setFakeLoading(false);
-        setInput('');
-        Cookies.remove(PROMPT_COOKIE_KEY);
-
-        setUploadedFiles([]);
-        setImageDataList([]);
-
-        resetEnhancer();
-        clearSemanticContext(); // Clear context after use
-
-        textareaRef.current?.blur();
-
-        return;
-      }
-
-      if (error != null) {
-        setMessages(messages.slice(0, -1));
-      }
-
-      const modifiedFiles = workbenchStore.getModifiedFiles();
-
-      chatStore.setKey('aborted', false);
-
-      if (modifiedFiles !== undefined) {
-        const userUpdateArtifact = filesToArtifacts(modifiedFiles, `${Date.now()}`);
-        const messageText = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${userUpdateArtifact}${finalMessageContent}`;
-
-        const attachmentOptions =
-          uploadedFiles.length > 0 ? { experimental_attachments: await filesToAttachments(uploadedFiles) } : undefined;
-
-        append(
-          {
-            role: 'user',
-            content: messageText,
-            parts: createMessageParts(messageText, imageDataList),
-          },
-          attachmentOptions,
-        );
-
-        workbenchStore.resetAllFileModifications();
       } else {
+        // This is an EXISTING chat.
         const messageText = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`;
-
         const attachmentOptions =
           uploadedFiles.length > 0 ? { experimental_attachments: await filesToAttachments(uploadedFiles) } : undefined;
 
@@ -592,15 +558,13 @@ export const ChatImpl = memo(
         );
       }
 
+      // Cleanup state for the next message
       setInput('');
       Cookies.remove(PROMPT_COOKIE_KEY);
-
       setUploadedFiles([]);
       setImageDataList([]);
-
       resetEnhancer();
-      clearSemanticContext(); // Clear context after use
-
+      clearSemanticContext();
       textareaRef.current?.blur();
     };
 

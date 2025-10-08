@@ -6,7 +6,9 @@ import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
 import { ControlPanel } from '~/components/@settings/core/ControlPanel';
 import { SettingsButton } from '~/components/ui/SettingsButton';
 import { Button } from '~/components/ui/Button';
-import { db, deleteById, getAll, chatId, type ChatHistoryItem, useChatHistory } from '~/lib/persistence';
+import { deleteById, getAll } from '~/lib/persistence/db';
+import { type ChatHistoryItem } from '~/lib/persistence/types';
+import { chatId, useChatHistory } from '~/lib/persistence/useChatHistory';
 import { cubicEasingFn } from '~/utils/easings';
 import { HistoryItem } from './HistoryItem';
 import { binDates } from './date-binning';
@@ -14,6 +16,10 @@ import { useSearchFilter } from '~/lib/hooks/useSearchFilter';
 import { classNames } from '~/utils/classNames';
 import { useStore } from '@nanostores/react';
 import { profileStore } from '~/lib/stores/profile';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { supabase } from '~/lib/supabase';
+import { useNavigate } from '@remix-run/react';
+import { sessionStore } from '~/lib/stores/session';
 
 const menuVariants = {
   closed: {
@@ -65,6 +71,8 @@ function CurrentDateTime() {
 
 export const Menu = () => {
   const { duplicateCurrentChat, exportChat } = useChatHistory();
+  const navigate = useNavigate();
+  const { user } = useStore(sessionStore);
   const menuRef = useRef<HTMLDivElement>(null);
   const [list, setList] = useState<ChatHistoryItem[]>([]);
   const [open, setOpen] = useState(false);
@@ -79,36 +87,32 @@ export const Menu = () => {
     searchFields: ['description'],
   });
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login');
+  };
+
   const loadEntries = useCallback(() => {
-    if (db) {
-      getAll(db)
-        .then((list) => list.filter((item) => item.urlId && item.description))
-        .then(setList)
-        .catch((error) => toast.error(error.message));
-    }
+    getAll()
+      .then((list) => list.filter((item) => item.urlId && item.description))
+      .then(setList)
+      .catch((error) => toast.error(error.message));
   }, []);
 
-  const deleteChat = useCallback(
-    async (id: string): Promise<void> => {
-      if (!db) {
-        throw new Error('Database not available');
-      }
+  const deleteChat = useCallback(async (id: string): Promise<void> => {
+    // Delete chat snapshot from localStorage
+    try {
+      const snapshotKey = `snapshot:${id}`;
+      localStorage.removeItem(snapshotKey);
+      console.log('Removed snapshot for chat:', id);
+    } catch (snapshotError) {
+      console.error(`Error deleting snapshot for chat ${id}:`, snapshotError);
+    }
 
-      // Delete chat snapshot from localStorage
-      try {
-        const snapshotKey = `snapshot:${id}`;
-        localStorage.removeItem(snapshotKey);
-        console.log('Removed snapshot for chat:', id);
-      } catch (snapshotError) {
-        console.error(`Error deleting snapshot for chat ${id}:`, snapshotError);
-      }
-
-      // Delete the chat from the database
-      await deleteById(db, id);
-      console.log('Successfully deleted chat:', id);
-    },
-    [db],
-  );
+    // Delete the chat from the database
+    await deleteById(id);
+    console.log('Successfully deleted chat:', id);
+  }, []);
 
   const deleteItem = useCallback(
     (event: React.UIEvent, item: ChatHistoryItem) => {
@@ -150,7 +154,7 @@ export const Menu = () => {
 
   const deleteSelectedItems = useCallback(
     async (itemsToDeleteIds: string[]) => {
-      if (!db || itemsToDeleteIds.length === 0) {
+      if (itemsToDeleteIds.length === 0) {
         console.log('Bulk delete skipped: No DB or no items to delete.');
         return;
       }
@@ -199,7 +203,7 @@ export const Menu = () => {
         window.location.pathname = '/';
       }
     },
-    [deleteChat, loadEntries, db],
+    [deleteChat, loadEntries],
   );
 
   const closeDialog = () => {
@@ -339,24 +343,45 @@ export const Menu = () => {
       >
         <div className="h-12 flex items-center justify-between px-4 border-b border-gray-100 dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-900/50 rounded-tr-2xl">
           <div className="text-gray-900 dark:text-white font-medium"></div>
-          <div className="flex items-center gap-3">
-            <span className="font-medium text-sm text-gray-900 dark:text-white truncate">
-              {profile?.username || 'Guest User'}
-            </span>
-            <div className="flex items-center justify-center w-[32px] h-[32px] overflow-hidden bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-500 rounded-full shrink-0">
-              {profile?.avatar ? (
-                <img
-                  src={profile.avatar}
-                  alt={profile?.username || 'User'}
-                  className="w-full h-full object-cover"
-                  loading="eager"
-                  decoding="sync"
-                />
-              ) : (
-                <div className="i-ph:user-fill text-lg" />
-              )}
+          {user ? (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger className="flex items-center gap-3 cursor-pointer">
+                <span className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                  {profile?.username || user.email}
+                </span>
+                <div className="flex items-center justify-center w-[32px] h-[32px] overflow-hidden bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-500 rounded-full shrink-0">
+                  {profile?.avatar ? (
+                    <img
+                      src={profile.avatar}
+                      alt={profile?.username || 'User'}
+                      className="w-full h-full object-cover"
+                      loading="eager"
+                      decoding="sync"
+                    />
+                  ) : (
+                    <div className="i-ph:user-fill text-lg" />
+                  )}
+                </div>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content
+                className="-mr-2 mt-2 w-48 bg-white dark:bg-gray-800 shadow-lg rounded-md py-1 border border-gray-200 dark:border-gray-700 z-50"
+                sideOffset={5}
+                align="end"
+              >
+                <DropdownMenu.Item
+                  onSelect={handleLogout}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer"
+                >
+                  <div className="i-ph:sign-out" />
+                  <span>Logout</span>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="font-medium text-sm text-gray-900 dark:text-white truncate">Guest User</span>
             </div>
-          </div>
+          )}
         </div>
         <CurrentDateTime />
         <div className="flex-1 flex flex-col h-full w-full overflow-hidden">

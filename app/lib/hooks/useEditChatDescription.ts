@@ -1,13 +1,8 @@
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
-import {
-  chatId as chatIdStore,
-  db,
-  description as descriptionStore,
-  getMessages,
-  updateChatDescription,
-} from '~/lib/persistence';
+import { chatId as chatIdStore, description as descriptionStore } from '~/lib/persistence/useChatHistory';
+import { getMessages, updateChatDescription } from '~/lib/persistence/db';
 
 interface EditChatDescriptionOptions {
   initialDescription?: string;
@@ -64,18 +59,19 @@ export function useEditChatDescription({
   }, []);
 
   const fetchLatestDescription = useCallback(async () => {
-    if (!db || !chatId) {
+    if (!chatId) {
+      // Removed !db check
       return initialDescription;
     }
 
     try {
-      const chat = await getMessages(db, chatId);
+      const chat = await getMessages(chatId); // Removed db argument
       return chat?.description || initialDescription;
     } catch (error) {
       console.error('Failed to fetch latest description:', error);
       return initialDescription;
     }
-  }, [db, chatId, initialDescription]);
+  }, [chatId, initialDescription]); // Removed db from dependency array
 
   const handleBlur = useCallback(async () => {
     const latestDescription = await fetchLatestDescription();
@@ -118,17 +114,13 @@ export function useEditChatDescription({
       }
 
       try {
-        if (!db) {
-          toast.error('Chat persistence is not available');
-          return;
-        }
-
         if (!chatId) {
+          // Removed !db check
           toast.error('Chat Id is not available');
           return;
         }
 
-        await updateChatDescription(db, chatId, currentDescription);
+        await updateChatDescription(chatId, currentDescription); // Removed db argument
 
         if (syncWithGlobalStore) {
           descriptionStore.set(currentDescription);
@@ -141,7 +133,7 @@ export function useEditChatDescription({
 
       toggleEditMode();
     },
-    [currentDescription, db, chatId, initialDescription, customChatId],
+    [currentDescription, chatId, initialDescription, customChatId, isValidDescription, syncWithGlobalStore], // Removed db from dependency array
   );
 
   const handleKeyDown = useCallback(

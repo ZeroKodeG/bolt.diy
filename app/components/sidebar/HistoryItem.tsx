@@ -1,6 +1,6 @@
 import { useParams } from '@remix-run/react';
 import { classNames } from '~/utils/classNames';
-import { type ChatHistoryItem } from '~/lib/persistence';
+import { type ChatHistoryItem } from '~/lib/persistence/types';
 import WithTooltip from '~/components/ui/Tooltip';
 import { useEditChatDescription } from '~/lib/hooks';
 import { forwardRef, type ForwardedRef, useCallback } from 'react';
