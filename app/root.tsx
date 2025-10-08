@@ -97,36 +97,24 @@ export default function App() {
       timestamp: new Date().toISOString(),
     });
 
-    // Comprobar sesión inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('[Root] Comprobación de sesión inicial:', session ? 'Sesión encontrada' : 'Sin sesión');
-      setSession(session);
-    });
-
-    // Escuchar cambios de autenticación
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`[Root] Evento onAuthStateChange: ${event}`, session);
-      setSession(session);
-
-      // Manejar navegación basada en eventos de autenticación
-      if (event === 'SIGNED_IN') {
-        console.log('[Root] Evento SIGNED_IN detectado, navegando a /');
-        navigate('/');
-      }
-
-      if (event === 'SIGNED_OUT') {
-        console.log('[Root] Evento SIGNED_OUT detectado, navegando a /login');
-        navigate('/login');
-      }
-    });
-
-    // Limpiar la suscripción al desmontar
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [navigate]); // Añadido navigate a las dependencias
+    // Initialize debug logging with improved error handling
+    import('./utils/debugLogger')
+      .then(({ debugLogger }) => {
+        /*
+         * The debug logger initializes itself and starts disabled by default
+         * It will only start capturing when enableDebugMode() is called
+         */
+        const status = debugLogger.getStatus();
+        logStore.logSystem('Debug logging ready', {
+          initialized: status.initialized,
+          capturing: status.capturing,
+          enabled: status.enabled,
+        });
+      })
+      .catch((error) => {
+        logStore.logError('Failed to initialize debug logging', error);
+      });
+  }, []);
 
   return (
     <Layout>
