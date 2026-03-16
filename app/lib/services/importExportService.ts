@@ -263,6 +263,7 @@ export class ImportExportService {
       Deepseek: '',
       Mistral: '',
       OpenAILike: '',
+      LiteLLM: '',
       Together: '',
       xAI: '',
       Perplexity: '',

@@ -16,12 +16,13 @@ import { Progress } from '~/components/ui/Progress';
 import OllamaModelInstaller from './OllamaModelInstaller';
 
 // Add type for provider names to ensure type safety
-type ProviderName = 'Ollama' | 'LMStudio' | 'OpenAILike';
+type ProviderName = 'Ollama' | 'LMStudio' | 'LiteLLM' | 'OpenAILike';
 
 // Update the PROVIDER_ICONS type to use the ProviderName type
 const PROVIDER_ICONS: Record<ProviderName, IconType> = {
   Ollama: BsRobot,
   LMStudio: BsRobot,
+  LiteLLM: TbBrandOpenai,
   OpenAILike: TbBrandOpenai,
 };
 
@@ -29,6 +30,7 @@ const PROVIDER_ICONS: Record<ProviderName, IconType> = {
 const PROVIDER_DESCRIPTIONS: Record<ProviderName, string> = {
   Ollama: 'Run open-source models locally on your machine',
   LMStudio: 'Local model inference with LM Studio',
+  LiteLLM: 'LiteLLM Proxy: unify models and APIs in a single endpoint',
   OpenAILike: 'Connect to OpenAI-compatible API endpoints',
 };
 
@@ -83,7 +85,7 @@ export default function LocalProvidersTab() {
   // Effect to filter and sort providers
   useEffect(() => {
     const newFilteredProviders = Object.entries(providers || {})
-      .filter(([key]) => [...LOCAL_PROVIDERS, 'OpenAILike'].includes(key))
+      .filter(([key]) => LOCAL_PROVIDERS.includes(key))
       .map(([key, value]) => {
         const provider = value as IProviderConfig;
         const envKey = providerBaseUrlEnvKeys[key]?.baseUrlKey;
@@ -111,13 +113,21 @@ export default function LocalProvidersTab() {
         } as IProviderConfig;
       });
 
-    // Custom sort function to ensure LMStudio appears before OpenAILike
+    // Custom sort: LMStudio, LiteLLM, OpenAILike, then rest
     const sorted = newFilteredProviders.sort((a, b) => {
       if (a.name === 'LMStudio') {
         return -1;
       }
 
       if (b.name === 'LMStudio') {
+        return 1;
+      }
+
+      if (a.name === 'LiteLLM') {
+        return -1;
+      }
+
+      if (b.name === 'LiteLLM') {
         return 1;
       }
 
