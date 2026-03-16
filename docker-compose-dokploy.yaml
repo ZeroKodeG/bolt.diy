@@ -1,5 +1,5 @@
 services:
-app-dev:
+  app-dev:
     image: bolt-ai:development
     build:
       target: bolt-ai-development
